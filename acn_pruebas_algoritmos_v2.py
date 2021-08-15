@@ -32,8 +32,9 @@ import pandas
 # If this is the case, make sure to also set the maximum resolve period to be 1 period so that the algorithm will be
 # called each period. An alternative is to repeat the charging rate a number of times equal to the max recompute period.
 
+# -----------------------------
 # Funciones de utilidad
-
+# -----------------------------
 def asa_qc(rates, infrastructure, interface, **kwargs):
     # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
     u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
@@ -43,6 +44,11 @@ def asa_qc(rates, infrastructure, interface, **kwargs):
 def total_energy(rates, infrastructure, interface, **kwargs):
     return cp.sum(get_period_energy(rates, infrastructure, interface.period))
 
+# -----------------------------
+
+# -----------------------------
+# Algoritmo base de ACN
+# -----------------------------
 class EarliestDeadlineFirstAlgo(BaseAlgorithm):
     """ Algorithm which assigns charging rates to each EV in order or departure time.
     Implements abstract class BaseAlgorithm.
@@ -127,8 +133,11 @@ def ExportarSimulacion(sim, sim_label):
     df = pandas.DataFrame(Unbal.transpose())
     #df.set_axis('NEMA', axis=0, inplace='True')
     df.to_excel(r'{}\Corrientes\{}-{}_Unbalsim_{}.xlsx'.format(ruta,t_end,t_start,sim_label))
+# -----------------------------
 
-# Armado de los schedules
+# -----------------------------------------------------------------
+# Funciones adicionales para el armado de las simulaciones
+# -----------------------------------------------------------------
 def ArmarSchedule(key):
     tasks = {}
 
@@ -193,7 +202,7 @@ def corriente_trafo(sim):
     Returns:
         Un np.array con cada timestamp en una columna y cada una de las fases de la corriente
     """
-    phase_ids = ("Primary A","Primary B", "Primary C")
+    phase_ids = ("Secondary A","Secondary B", "Secondary C")
     currents_dict = acnsim.constraint_currents(sim, constraint_ids=phase_ids)
     currents = np.vstack([currents_dict[phase] for phase in phase_ids])
     currents.transpose()
@@ -211,6 +220,8 @@ def desbalance_trafo(sim):
     # Variables locales de llamada
     phase_ids = ("Primary A","Primary B", "Primary C")
     return acnsim.current_unbalance(sim,unbalance_type="NEMA_ponderado",phase_ids=phase_ids)
+
+# -----------------------------------------------------------------
 
 # -- Run Simulation ----------------------------------------------------------------------------------------------------
 from datetime import datetime
