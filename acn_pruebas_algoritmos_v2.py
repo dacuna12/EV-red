@@ -38,12 +38,50 @@ import pandas
 def asa_qc(rates, infrastructure, interface, **kwargs):
     # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
     u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+
     u_es = adacharge.equal_share(rates, infrastructure, interface, **kwargs)
     return u_qc+10e-12*u_es
 
 def total_energy(rates, infrastructure, interface, **kwargs):
     return cp.sum(get_period_energy(rates, infrastructure, interface.period))
 
+def rates_phase(rates,infrastructure, interface,**kwargs):
+    # Procedimiento que suma las corrientes de la misma fase
+
+    # N: cantidad de vehiculos // T: cantidad de pasos de optimización
+    N = rates.shape[0]
+    T = rates.shape[1]
+    # j = rates[0,0]
+    # Listas en las que voy a poner los vehiculos de cada fase
+    # rates_ab = []
+    # rates_bc = []
+    # rates_ca = []
+    costo = 0
+    # Se itera en los rates y la fase se levanta del infrasestructure
+    for t in range(T):
+        rates_ab = []
+        rates_bc = []
+        rates_ca = []
+        for i in range(N):
+            if infrastructure.phases[i] == 30:
+                rates_ab.append(rates[i,t])
+            elif infrastructure.phases[i] == 150:
+                rates_bc.append(rates[i,t])
+            else:
+                rates_ca.append(rates[i,t])
+
+        g1 = cp.sum(rates_ab,axis=0)
+        g2 = cp.sum(rates_bc, axis=0)
+        g3 = cp.sum(rates_ca, axis=0)
+
+        M = np.array([[1,-1/2,-1/2],
+                      [-1/2,1,-1/2],
+                      [-1/2,-1/2,1]])
+
+        g = cp.vstack([g1,g2,g3])
+        costo = cp.sum(costo,g.T @ M @ g)
+
+    return costo
 # -----------------------------
 
 # -----------------------------
@@ -190,6 +228,19 @@ def ArmarSchedule(key):
         simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period))
         agendados[-1].solve()
         simulaciones[-1].run()
+    @task
+    def ExecUnbalMin1():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveChargingAlgorithmOffline(
+                [adacharge.ObjectiveComponent(rates_phase)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        agendados[-1].register_events(events)
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period))
+        agendados[-1].solve()
+        simulaciones[-1].run()
 
     tasks['Exec' + key]()
 
@@ -235,8 +286,8 @@ from acnportal import algorithms
 
 # -- Experiment Parameters ---------------------------------------------------------------------------------------------
 timezone = pytz.timezone("America/Los_Angeles")
-t_start = [2019,9,1]
-t_end = [2019,9,2]
+t_start = [2018,9,5]
+t_end = [2018,9,6]
 start = timezone.localize(datetime(t_start[0],t_start[1],t_start[2]))
 end = timezone.localize(datetime(t_end[0],t_end[1],t_end[2]))
 period = 5  # minute
@@ -250,8 +301,9 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 # - TotalEnergy
 # - QuickCharge
 # - AsaQc
+# - UnbalMin1
 
-metodos = ("TotalEnergy","AsaQc")
+metodos = ("AsaQc","UnbalMin1")
 agendados = []
 simulaciones = []
 
