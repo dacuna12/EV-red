@@ -67,7 +67,7 @@ def rates_phase(rates,infrastructure, interface,**kwargs):
                 rates_ca.append(rates[i,t])
 
         # Armo el vector de variables de rates
-        g = cp.vstack([cp.sum(rates_ab,axis=0), cp.sum(rates_bc, axis=0), cp.sum(rates_ca, axis=0)])
+        g = cp.vstack([cp.sum(rates_ab), cp.sum(rates_bc), cp.sum(rates_ca)])
         # Matriz de transformacion
         M = np.array([[1,-1/2,-1/2],
                       [-1/2,1,-1/2],
@@ -75,8 +75,8 @@ def rates_phase(rates,infrastructure, interface,**kwargs):
         # Computo el costo por paso
         costo_por_paso.append(cp.quad_form(g, M))
 
-    costo = cp.sum(costo_por_paso,axis=1)
-    return costo
+    #costo = cp.sum(costo_por_paso,axis=0)
+    return -cp.sum(costo_por_paso,axis=0)
 # -----------------------------
 
 # -----------------------------
