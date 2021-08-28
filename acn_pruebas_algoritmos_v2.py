@@ -51,18 +51,14 @@ def rates_phase(rates,infrastructure, interface,**kwargs):
     # N: cantidad de vehiculos // T: cantidad de pasos de optimización
     N = rates.shape[0]
     T = rates.shape[1]
-    # j = rates[0,0]
-    # Listas en las que voy a poner los vehiculos de cada fase
-    # rates_ab = []
-    # rates_bc = []
-    # rates_ca = []
-    costo = 0
+
+    costo_por_paso =[]
     # Se itera en los rates y la fase se levanta del infrasestructure
-    for t in range(T):
+    for t in range(0,T):
         rates_ab = []
         rates_bc = []
         rates_ca = []
-        for i in range(N):
+        for i in range(0,N):
             if infrastructure.phases[i] == 30:
                 rates_ab.append(rates[i,t])
             elif infrastructure.phases[i] == 150:
@@ -70,17 +66,16 @@ def rates_phase(rates,infrastructure, interface,**kwargs):
             else:
                 rates_ca.append(rates[i,t])
 
-        g1 = cp.sum(rates_ab,axis=0)
-        g2 = cp.sum(rates_bc, axis=0)
-        g3 = cp.sum(rates_ca, axis=0)
-
+        # Armo el vector de variables de rates
+        g = cp.vstack([cp.sum(rates_ab,axis=0), cp.sum(rates_bc, axis=0), cp.sum(rates_ca, axis=0)])
+        # Matriz de transformacion
         M = np.array([[1,-1/2,-1/2],
                       [-1/2,1,-1/2],
                       [-1/2,-1/2,1]])
+        # Computo el costo por paso
+        costo_por_paso.append(cp.quad_form(g, M))
 
-        g = cp.vstack([g1,g2,g3])
-        costo = cp.sum(costo,g.T @ M @ g)
-
+    costo = cp.sum(costo_por_paso,axis=1)
     return costo
 # -----------------------------
 
