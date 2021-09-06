@@ -42,6 +42,14 @@ def asa_qc(rates, infrastructure, interface, **kwargs):
     u_es = adacharge.equal_share(rates, infrastructure, interface, **kwargs)
     return u_qc+10e-12*u_es
 
+def asa_qc_unbal(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/100
+    # Es un ponderadador de desbalance
+    u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_qc+alpha_unbal*u_unbal
+
 def total_energy(rates, infrastructure, interface, **kwargs):
     return cp.sum(get_period_energy(rates, infrastructure, interface.period))
 
@@ -159,7 +167,7 @@ def ExportarSimulacion(sim, sim_label):
     # Corrientes
     I = corriente_trafo(sim)
     df = pandas.DataFrame(I.transpose())
-    df.set_axis(('TR_C','TR_A','TR_B'), axis='columns', inplace='True')
+    df.set_axis(('TR_A','TR_B','TR_C'), axis='columns', inplace='True')
     df.to_excel(r'{}\Corrientes\{}-{}_Isim_{}.xlsx'.format(ruta,t_end,t_start,sim_label))
     # Desbalance
     Unbal = desbalance_trafo(sim)
@@ -261,13 +269,86 @@ def desbalance_trafo(sim):
         sim (Simulator): simulacion
 
     Returns:
-        Un np.array con cada timestamp en una columna y cada una de las fases de la corriente
+        Un np.array con los timestamp y el desbalance
     """
     # Variables locales de llamada
     phase_ids = ("Primary A","Primary B", "Primary C")
-    return acnsim.current_unbalance(sim,unbalance_type="NEMA_ponderado",phase_ids=phase_ids)
+    return acnsim.current_unbalance(sim,unbalance_type="componentes_inversa",phase_ids=phase_ids)
 
 # -----------------------------------------------------------------
+
+# Analisis
+
+def graficar_simulaciones(simulaciones,tipo_grafico):
+    # Este procedimiento grafica las corrientes simuladas y el desbalance
+    # La entrada tipo_grafico es para decidir si usar un subplot o un gráfico agrupado
+
+    ## Variables generales del plot
+    etiquetas = ["Ia","Ib","Ic"]
+    locator = mdates.AutoDateLocator(maxticks=6)
+    formatter = mdates.ConciseDateFormatter(locator)
+
+    ## Creo la grafica en funcion del tipo de grafico
+    if tipo_grafico == 'unico':
+        fig_I, axsI = plt.subplots()
+    elif tipo_grafico == 'porFase':
+        fig_I, axsI = plt.subplots(len(simulaciones), 1, sharey=True, sharex=True)
+    else:
+        print(f"El metodo {tipo_grafico} no esta implementado. Se realiza un grafico unico")
+        fig_I, axsI = plt.subplots()
+
+    for i_sim in range(0, len(simulaciones)):
+        # Levanto las corrientes por fase y el tiempo de cada simulacion
+        I = corriente_trafo(simulaciones[i_sim])
+        t = mdates.date2num(acnsim.datetimes_array(simulaciones[i_sim]))
+
+        # Se distingue el tipo de ploteo
+        if tipo_grafico == 'unico':
+            for I_arr, etiqueta in zip(I, etiquetas):
+                axsI.plot(t, I_arr, label=etiqueta)
+            axsI.set_title(metodos[i_sim])
+            # Grilla y referencias
+            #plt.grid(True)
+            #plt.legend()
+        elif tipo_grafico=='porFase':
+            for I_arr, etiqueta in zip(I,etiquetas):
+                axsI[i_sim].plot(t,I_arr, label=etiqueta)
+            axsI[i_sim].set_title(metodos[i_sim])
+            # Grilla y referencias
+
+    # Se ajustan los ejes de las graficas
+    for ax in axsI:
+        ax.set_ylabel("Current (A)")
+        for label in ax.get_xticklabels():
+            label.set_rotation(40)
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
+        plt.legend()
+
+    # Titulo general
+    fig_I.suptitle('Corriente en secundario del TR', fontsize=14)
+    #plt.show()
+
+    # -------------------------------------------------------------------------------
+    # Desbalance del trafo - En este caso pongo all en el mismo grafico
+    fig_unbal, axs_unbal = plt.subplots()
+    for i_sim in range(0, len(simulaciones)):
+        unbal = desbalance_trafo(simulaciones[i_sim])
+        axs_unbal.plot(t, unbal, label=metodos[i_sim])
+
+    # Se ajustan los ejes x de las graficas
+    axs_unbal.set_ylabel("Indicador gT*M*g")
+    for label in axs_unbal.get_xticklabels():
+        label.set_rotation(40)
+    axs_unbal.xaxis.set_major_locator(locator)
+    axs_unbal.xaxis.set_major_formatter(formatter)
+    # Agrego el grid y las etiquetas
+    plt.grid(True)
+    plt.legend()
+    fig_unbal.suptitle('Indicador de desbalance', fontsize=14)
+
+    plt.show()
+
 
 # -- Run Simulation ----------------------------------------------------------------------------------------------------
 from datetime import datetime
@@ -323,25 +404,28 @@ for i in range(0,len(metodos)):
 # might see a small difference. This is because the included algorithm uses a more efficient bisection based method
 # instead of our simpler linear search to find a feasible rate.
 
+graficar_simulaciones(simulaciones,'porFase')
+
 # Set locator and formatter for datetimes on x-axis.
-locator = mdates.AutoDateLocator(maxticks=6)
-formatter = mdates.ConciseDateFormatter(locator)
-fig, axs = plt.subplots(1, len(simulaciones), sharey=True, sharex=True)
+# locator = mdates.AutoDateLocator(maxticks=6)
+# formatter = mdates.ConciseDateFormatter(locator)
+# fig, axs = plt.subplots(1, len(simulaciones), sharey=True, sharex=True)
+#
+# # Exportacion de la simulacion a EXCEL
+# for i in range(0,len(simulaciones)):
+#     # Exportacion de la simulacion
+#     ExportarSimulacion(simulaciones[i],metodos[i])
+#     # Ejes
+#     axs[i].plot(mdates.date2num(acnsim.datetimes_array(simulaciones[i])), acnsim.aggregate_current(simulaciones[i]), label=metodos[i])
+#     axs[i].set_title(metodos[i])
+#
+# # Se ajustan los ejes de las graficas
+# for ax in axs:
+#     ax.set_ylabel("Current (A)")
+#     for label in ax.get_xticklabels():
+#         label.set_rotation(40)
+#     ax.xaxis.set_major_locator(locator)
+#     ax.xaxis.set_major_formatter(formatter)
+# plt.show()
 
-# Exportacion de la simulacion a EXCEL
-for i in range(0,len(simulaciones)):
-    # Exportacion de la simulacion
-    ExportarSimulacion(simulaciones[i],metodos[i])
-    # Ejes
-    axs[i].plot(mdates.date2num(acnsim.datetimes_array(simulaciones[i])), acnsim.aggregate_current(simulaciones[i]), label=metodos[i])
-    axs[i].set_title(metodos[i])
-
-# Se ajustan los ejes de las graficas
-for ax in axs:
-    ax.set_ylabel("Current (A)")
-    for label in ax.get_xticklabels():
-        label.set_rotation(40)
-    ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(formatter)
-plt.show()
 
