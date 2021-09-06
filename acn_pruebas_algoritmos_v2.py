@@ -38,7 +38,6 @@ import pandas
 def asa_qc(rates, infrastructure, interface, **kwargs):
     # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
     u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
-
     u_es = adacharge.equal_share(rates, infrastructure, interface, **kwargs)
     return u_qc+10e-12*u_es
 
@@ -245,6 +244,20 @@ def ArmarSchedule(key):
         agendados[-1].solve()
         simulaciones[-1].run()
 
+    @task
+    def ExecAsaqcUnbal():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveChargingAlgorithmOffline(
+                [adacharge.ObjectiveComponent(asa_qc_unbal)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        agendados[-1].register_events(events)
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period))
+        agendados[-1].solve()
+        simulaciones[-1].run()
+
     tasks['Exec' + key]()
 
 def corriente_trafo(sim):
@@ -331,6 +344,7 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
 
     # -------------------------------------------------------------------------------
     # Desbalance del trafo - En este caso pongo all en el mismo grafico
+    # -------------------------------------------------------------------------------
     fig_unbal, axs_unbal = plt.subplots()
     for i_sim in range(0, len(simulaciones)):
         unbal = desbalance_trafo(simulaciones[i_sim])
@@ -347,7 +361,34 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     plt.legend()
     fig_unbal.suptitle('Indicador de desbalance', fontsize=14)
 
+    # -------------------------------------------------------------------------------
+    # Energia total
+    # -------------------------------------------------------------------------------
+    fig_E, axs_E = plt.subplots()
+    for i_sim in range(0, len(simulaciones)):
+        Energia = obtener_energia_simulada(simulaciones[i_sim])
+        axs_E.plot(t, Energia, label=metodos[i_sim])
+
+    # Se ajustan los ejes x de las graficas
+    axs_E.set_ylabel("Energia acumulada (kWh)")
+    for label in axs_E.get_xticklabels():
+        label.set_rotation(40)
+    axs_E.xaxis.set_major_locator(locator)
+    axs_E.xaxis.set_major_formatter(formatter)
+    # Agrego el grid y las etiquetas
+    plt.grid(True)
+    plt.legend()
+    fig_E.suptitle('Energía acumulada', fontsize=14)
+
+    # Se muestran todas las graficas
     plt.show()
+
+def obtener_energia_simulada(sim):
+    period_in_hours = period / 60
+    mat_E = sim.charging_rates_as_df()*(voltage/1e3)*(period/60) # Energía en kWh
+    E_t = mat_E.sum(axis=1).cumsum(axis=0)
+    return E_t
+    #for i_sim in range(0,len(simulaciones)):
 
 
 # -- Run Simulation ----------------------------------------------------------------------------------------------------
@@ -369,6 +410,7 @@ end = timezone.localize(datetime(t_end[0],t_end[1],t_end[2]))
 period = 5  # minute
 voltage = 208  # volts
 default_battery_power = 32 * voltage / 1000  # kW
+exportar = True
 site = "caltech"
 ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 
@@ -379,7 +421,7 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 # - AsaQc
 # - UnbalMin1
 
-metodos = ("AsaQc","UnbalMin1")
+metodos = ("AsaQc","UnbalMin1","AsaqcUnbal")
 agendados = []
 simulaciones = []
 
@@ -399,33 +441,24 @@ for i in range(0,len(metodos)):
     ArmarSchedule(metodos[i])
 
 # -- Analysis ----------------------------------------------------------------------------------------------------------
-# We can now compare the two algorithms side by side by looking that the plots of aggregated current.
-# We see from these plots that our implementation matches th included one quite well. If we look closely however, we
-# might see a small difference. This is because the included algorithm uses a more efficient bisection based method
-# instead of our simpler linear search to find a feasible rate.
+# Se realizan graficas de las corrientes desbalanceadas y del indicador de desbalance
+# Las entradas son la lista de simulaciones realizadas y un str que refiere a como se graficas los resultados
+# de corriente, el mismo puede valer 'porFase' para obtener un subplot con cada grafico o 'unico' en el que se muestra
+# todos los resultados agrupados
 
+# # Energia exportada
+# E_por_sim = obtener_energia_simulada(simulaciones)
+#
+# print(f"La energia obtenida por los metodos {metodos} es {E_por_sim}")
+
+# Graficas
 graficar_simulaciones(simulaciones,'porFase')
 
-# Set locator and formatter for datetimes on x-axis.
-# locator = mdates.AutoDateLocator(maxticks=6)
-# formatter = mdates.ConciseDateFormatter(locator)
-# fig, axs = plt.subplots(1, len(simulaciones), sharey=True, sharex=True)
-#
-# # Exportacion de la simulacion a EXCEL
-# for i in range(0,len(simulaciones)):
-#     # Exportacion de la simulacion
-#     ExportarSimulacion(simulaciones[i],metodos[i])
-#     # Ejes
-#     axs[i].plot(mdates.date2num(acnsim.datetimes_array(simulaciones[i])), acnsim.aggregate_current(simulaciones[i]), label=metodos[i])
-#     axs[i].set_title(metodos[i])
-#
-# # Se ajustan los ejes de las graficas
-# for ax in axs:
-#     ax.set_ylabel("Current (A)")
-#     for label in ax.get_xticklabels():
-#         label.set_rotation(40)
-#     ax.xaxis.set_major_locator(locator)
-#     ax.xaxis.set_major_formatter(formatter)
-# plt.show()
+# -- Exportacion ----------------------------------------------------------------------------------------------------------
+if exportar:
+    for i in range(0,len(simulaciones)):
+        # Exportacion de la simulacion
+        ExportarSimulacion(simulaciones[i],metodos[i])
+
 
 
