@@ -364,6 +364,7 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     # -------------------------------------------------------------------------------
     # Energia total
     # -------------------------------------------------------------------------------
+    E_dem = np.sum(np.array(energias_demandadas))
     fig_E, axs_E = plt.subplots()
     for i_sim in range(0, len(simulaciones)):
         Energia = obtener_energia_simulada(simulaciones[i_sim])
@@ -376,6 +377,7 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     axs_E.xaxis.set_major_locator(locator)
     axs_E.xaxis.set_major_formatter(formatter)
     # Agrego el grid y las etiquetas
+    plt.axhline(y=E_dem, color='r',linestyle='--')
     plt.grid(True)
     plt.legend()
     fig_E.suptitle('Energía acumulada', fontsize=14)
@@ -424,6 +426,7 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 metodos = ("AsaQc","UnbalMin1","AsaqcUnbal")
 agendados = []
 simulaciones = []
+energias_demandadas =[]
 
 # -- Network -----------------------------------------------------------------------------------------------------------
 cn = acnsim.sites.caltech_acn(basic_evse=True, voltage=voltage)
@@ -431,7 +434,7 @@ cn = acnsim.sites.caltech_acn(basic_evse=True, voltage=voltage)
 # -- Events ------------------------------------------------------------------------------------------------------------
 API_KEY = "DEMO_TOKEN"
 events = acnsim.acndata_events.generate_events(
-    API_KEY, site, start, end, period, voltage, default_battery_power
+    API_KEY, site, start, end, period, voltage, default_battery_power,energias_demandadas,
 )
 
 # -- Scheduling Algorithm & Simulation ----------------------------------------------------------------------------------------------
