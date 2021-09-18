@@ -41,13 +41,14 @@ def asa_qc(rates, infrastructure, interface, **kwargs):
     u_es = adacharge.equal_share(rates, infrastructure, interface, **kwargs)
     return u_qc+10e-12*u_es
 
-def asa_qc_unbal(rates, infrastructure, interface, **kwargs):
+def rates_unbal(rates, infrastructure, interface, **kwargs):
     # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
     alpha_unbal = 1/100
     # Es un ponderadador de desbalance
-    u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
     u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
-    return u_qc+alpha_unbal*u_unbal
+    return u_rates+alpha_unbal*u_unbal
 
 def total_energy(rates, infrastructure, interface, **kwargs):
     return cp.sum(get_period_energy(rates, infrastructure, interface.period))
@@ -137,6 +138,18 @@ class EarliestDeadlineFirstAlgo(BaseAlgorithm):
                     break
         #print(schedule)
         return schedule
+
+# Obtener los datos de los autos
+def datos_ev(token, site, start, end, period):
+    client = acnsim.acndata_events.DataClient(token)
+    docs = client.get_sessions_by_time(site, start, end)
+    evs = []
+    offset = acnsim.acndata_events._datetime_to_timestamp(start, period)
+    for d in docs:
+        arrival = acnsim.acndata_events._datetime_to_timestamp(d["connectionTime"], period) - offset
+        departure = acnsim.acndata_events._datetime_to_timestamp(d["disconnectTime"], period) - offset
+        evs.append([d["sessionID"],d["spaceID"],arrival,departure,d['kWhDelivered']])
+    return evs
 
 # Visualizador
 def ExportarSimulacion(sim, sim_label):
@@ -245,11 +258,11 @@ def ArmarSchedule(key):
         simulaciones[-1].run()
 
     @task
-    def ExecAsaqcUnbal():
+    def ExecRatesUnbal():
         # Esta funcion de utilidad que minimiza el desbalance
         agendados.append(
             adacharge.AdaptiveChargingAlgorithmOffline(
-                [adacharge.ObjectiveComponent(asa_qc_unbal)], solver=cp.MOSEK, enforce_energy_equality=False
+                [adacharge.ObjectiveComponent(rates_unbal)], solver=cp.MOSEK, enforce_energy_equality=False
             )
         )
         agendados[-1].register_events(events)
@@ -288,15 +301,45 @@ def desbalance_trafo(sim):
     phase_ids = ("Primary A","Primary B", "Primary C")
     return acnsim.current_unbalance(sim,unbalance_type="componentes_inversa",phase_ids=phase_ids)
 
+def energias_por_EV(simulaciones):
+    # Obtengo las matrices con las energias - Son PANDAS que tienen en Energias_sim[i_ener].axes[1][i] el cargador
+    # Los resultados se almaceana en un numpy_array donde:
+    # - filas para cada uno de los autos que entraron al Garage
+    # - columnas, en la primera la energia demandada y en las restantes todas las simulaciones
+
+    # Inicializacion de la salida de la funcion
+    Resultados_E = np.zeros((len(autos),len(simulaciones)+1))
+    #Resultados_E[:,0]=np.array(autos[:][-1])
+
+    # Armo la lista con las simulaciones
+    Energias_sim=[]
+    for i_ener in range(0, len(simulaciones)):
+        Energias_sim.append(obtener_energia_simulada(simulaciones[i_ener], 'porCargador'))
+
+    # Itero en cada auto para obtener la energia simulada
+    for i_auto in range(0, len(autos)):
+        # Levanto los datos relevantes del auto (cargador al cual esta conectado y en los tiempos que estuvo)
+        cargador = autos[i_auto][1]
+        t_plug = autos[i_auto][2]
+        t_unplug = autos[i_auto][3]
+        Resultados_E[i_auto, 0]=autos[i_auto][-1]
+        for i_ener in range(0, len(Energias_sim)):
+            # Levanto el vector de energias acumuladas
+            #E_t = Energias_sim[i_ener][cargador]
+            Resultados_E[i_auto, i_ener+1]=Energias_sim[i_ener][cargador][t_unplug]-Energias_sim[i_ener][cargador][t_plug]
+
+    return Resultados_E
+
 # -----------------------------------------------------------------
 
-# Analisis
+# Graficas
 
 def graficar_simulaciones(simulaciones,tipo_grafico):
     # Este procedimiento grafica las corrientes simuladas y el desbalance
     # La entrada tipo_grafico es para decidir si usar un subplot o un gráfico agrupado
 
     ## Variables generales del plot
+    guardar_graficas = False
     etiquetas = ["Ia","Ib","Ic"]
     locator = mdates.AutoDateLocator(maxticks=6)
     formatter = mdates.ConciseDateFormatter(locator)
@@ -340,7 +383,7 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
 
     # Titulo general
     fig_I.suptitle('Corriente en secundario del TR', fontsize=14)
-    #plt.show()
+    if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_I-TR.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
 
     # -------------------------------------------------------------------------------
     # Desbalance del trafo - En este caso pongo all en el mismo grafico
@@ -360,16 +403,21 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     plt.grid(True)
     plt.legend()
     fig_unbal.suptitle('Indicador de desbalance', fontsize=14)
+    if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_Unbal.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
 
     # -------------------------------------------------------------------------------
     # Energia total
     # -------------------------------------------------------------------------------
-    E_dem = np.sum(np.array(energias_demandadas))
+
+    # Energía total solicitda por los autos
+    E_dem = 0
+    for i in range(0,len(autos)):
+        E_dem = E_dem + autos[i][-1]
+    # Ploteos de energia en el mismo subplot
     fig_E, axs_E = plt.subplots()
     for i_sim in range(0, len(simulaciones)):
         Energia = obtener_energia_simulada(simulaciones[i_sim])
         axs_E.plot(t, Energia, label=metodos[i_sim])
-
     # Se ajustan los ejes x de las graficas
     axs_E.set_ylabel("Energia acumulada (kWh)")
     for label in axs_E.get_xticklabels():
@@ -377,21 +425,47 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     axs_E.xaxis.set_major_locator(locator)
     axs_E.xaxis.set_major_formatter(formatter)
     # Agrego el grid y las etiquetas
-    plt.axhline(y=E_dem, color='r',linestyle='--')
+    plt.axhline(y=E_dem, color='r',linestyle='--',label='E_dem_EVs')
     plt.grid(True)
     plt.legend()
     fig_E.suptitle('Energía acumulada', fontsize=14)
+    if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_Energia.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
+
+    # -------------------------------------------------------------------------------
+    # Energía de cada auto
+    # -------------------------------------------------------------------------------
+
+    # Se obtiene la matriz de energias y se hace el ploteo
+    Resultados_E = energias_por_EV(simulaciones)
+    plot_energias_xy(Resultados_E,metodos)
 
     # Se muestran todas las graficas
     plt.show()
 
-def obtener_energia_simulada(sim):
-    period_in_hours = period / 60
-    mat_E = sim.charging_rates_as_df()*(voltage/1e3)*(period/60) # Energía en kWh
-    E_t = mat_E.sum(axis=1).cumsum(axis=0)
+def obtener_energia_simulada(sim,tipo='acumulada'):
+    # Funcion que obtiene el vector de energías simuladas para el despacho elegido
+    E_t = sim.charging_rates_as_df()*(voltage/1e3)*(period/60) # Energía en kWh
+    if tipo == 'acumulada':
+        E_t = E_t.sum(axis=1).cumsum(axis=0)
+    else:
+        E_t = E_t.cumsum(axis=0)
     return E_t
-    #for i_sim in range(0,len(simulaciones)):
 
+
+def plot_energias_xy(Energias,labels):
+    ## Plotea el grafico de dispersion entre la energía deseada y la despachada
+    f, ax = plt.subplots()
+    f.suptitle('Energia demandada y despachada por vehículo')
+    # Ploteo de la energia
+    for j in range(1,Energias.shape[1]):
+        ax.scatter(Energias[:,0], Energias[:,j],marker='o', alpha=0.5,label=labels[j-1])
+    # Ploteo la linea diagonal
+    ax.plot([0, np.amax(Energias[:,0],axis=0)], [0, np.amax(Energias[:,0],axis=0)], ls="--", c=".3")
+    # Ajustes cosmeticos
+    ax.set_xlabel("Energia demandanda (kWh)")
+    ax.set_ylabel("Energia despachada (kWh)")
+    plt.grid(True)
+    plt.legend()
 
 # -- Run Simulation ----------------------------------------------------------------------------------------------------
 from datetime import datetime
@@ -406,7 +480,7 @@ from acnportal import algorithms
 # -- Experiment Parameters ---------------------------------------------------------------------------------------------
 timezone = pytz.timezone("America/Los_Angeles")
 t_start = [2018,9,5]
-t_end = [2018,9,6]
+t_end = [2018,9,7]
 start = timezone.localize(datetime(t_start[0],t_start[1],t_start[2]))
 end = timezone.localize(datetime(t_end[0],t_end[1],t_end[2]))
 period = 5  # minute
@@ -423,10 +497,11 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 # - AsaQc
 # - UnbalMin1
 
-metodos = ("AsaQc","UnbalMin1","AsaqcUnbal")
+metodos = ("AsaQc","RatesUnbal")
 agendados = []
 simulaciones = []
 energias_demandadas =[]
+autos = []
 
 # -- Network -----------------------------------------------------------------------------------------------------------
 cn = acnsim.sites.caltech_acn(basic_evse=True, voltage=voltage)
@@ -436,7 +511,7 @@ API_KEY = "DEMO_TOKEN"
 events = acnsim.acndata_events.generate_events(
     API_KEY, site, start, end, period, voltage, default_battery_power,energias_demandadas,
 )
-
+autos = datos_ev(API_KEY, site, start, end, period)
 # -- Scheduling Algorithm & Simulation ----------------------------------------------------------------------------------------------
 
 # Armados de schedules en funcion de los metodos
@@ -449,19 +524,14 @@ for i in range(0,len(metodos)):
 # de corriente, el mismo puede valer 'porFase' para obtener un subplot con cada grafico o 'unico' en el que se muestra
 # todos los resultados agrupados
 
-# # Energia exportada
-# E_por_sim = obtener_energia_simulada(simulaciones)
-#
-# print(f"La energia obtenida por los metodos {metodos} es {E_por_sim}")
 
-# Graficas
-graficar_simulaciones(simulaciones,'porFase')
 
 # -- Exportacion ----------------------------------------------------------------------------------------------------------
 if exportar:
     for i in range(0,len(simulaciones)):
         # Exportacion de la simulacion
         ExportarSimulacion(simulaciones[i],metodos[i])
-
+# Graficas
+graficar_simulaciones(simulaciones,'porFase')
 
 
