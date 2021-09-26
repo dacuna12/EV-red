@@ -41,6 +41,9 @@ def asa_qc(rates, infrastructure, interface, **kwargs):
     u_es = adacharge.equal_share(rates, infrastructure, interface, **kwargs)
     return u_qc+10e-12*u_es
 
+def only_rates(rates, infrastructure, interface, **kwargs):
+    return cp.sum(rates)
+
 def rates_unbal(rates, infrastructure, interface, **kwargs):
     # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
     alpha_unbal = 1/100
@@ -151,41 +154,57 @@ def datos_ev(token, site, start, end, period):
         evs.append([d["sessionID"],d["spaceID"],arrival,departure,d['kWhDelivered']])
     return evs
 
-# Visualizador
-def ExportarSimulacion(sim, sim_label):
+# Exportacion de las simulaciones
+def ExportarSimulacion(simulaciones,metodos):
     # Este procedimiento es el que va a exportar el schedule para luego simularlo en SINCAL
 
     #-----------------
     # SINCAL
     #-----------------
     # Se cargan los datos del Data Panda Frame
-    df = sim.charging_rates_as_df()
+    for i_sim in range(0, len(simulaciones)):
+        df = simulaciones[i_sim].charging_rates_as_df()
 
-    # Renombro los ejes para el SINCAL
-    ejes = []
-    for i in range(0,len(df.axes[1])):
-        ejes.append("P_"+df.axes[1][i])
-    df.set_axis(ejes, axis='columns',inplace='True')
+        # Renombro los ejes para el SINCAL
+        ejes = []
+        for i in range(0,len(df.axes[1])):
+            ejes.append("P_"+df.axes[1][i])
+        df.set_axis(ejes, axis='columns',inplace='True')
 
-    # Los paso a potencia en MW
-    P = df*voltage/1e6
+        # Los paso a potencia en MW
+        P = df*voltage/1e6
 
-    # Exportacion en Excel
-    P.to_excel(r'{}\Sincal\{}-{}_SincalProfiles_{}.xlsx'.format(ruta,t_end,t_start,sim_label))
+        # Exportacion en Excel
+        P.to_excel(r'{}\Sincal\{}-{}_SincalProfiles_{}.xlsx'.format(ruta,t_end,t_start,metodos[i_sim]))
 
     #----------------------
     # Trafo
     #----------------------
     # Corrientes
-    I = corriente_trafo(sim)
-    df = pandas.DataFrame(I.transpose())
-    df.set_axis(('TR_A','TR_B','TR_C'), axis='columns', inplace='True')
-    df.to_excel(r'{}\Corrientes\{}-{}_Isim_{}.xlsx'.format(ruta,t_end,t_start,sim_label))
-    # Desbalance
-    Unbal = desbalance_trafo(sim)
-    df = pandas.DataFrame(Unbal.transpose())
-    #df.set_axis('NEMA', axis=0, inplace='True')
-    df.to_excel(r'{}\Corrientes\{}-{}_Unbalsim_{}.xlsx'.format(ruta,t_end,t_start,sim_label))
+    for i_sim in range(0, len(simulaciones)):
+        I = corriente_trafo(simulaciones[i_sim])
+        df = pandas.DataFrame(I.transpose())
+        df.set_axis(('TR_A','TR_B','TR_C'), axis='columns', inplace='True')
+        df.to_excel(r'{}\Corrientes\{}-{}_Isim_{}.xlsx'.format(ruta,t_end,t_start,metodos[i_sim]))
+        # Desbalance
+        Unbal = desbalance_trafo(simulaciones[i_sim])
+        df = pandas.DataFrame(Unbal.transpose())
+        #df.set_axis('NEMA', axis=0, inplace='True')
+        df.to_excel(r'{}\Corrientes\{}-{}_Unbalsim_{}.xlsx'.format(ruta,t_end,t_start,metodos[i_sim]))
+
+    #----------------------
+    # Energias
+    #----------------------
+    Resultados_E = energias_por_EV(simulaciones)
+    np.savetxt(r'{}\Energias\{}-{}_EnegiasEV.csv'.format(ruta,t_end,t_start),Resultados_E,delimiter=",")
+
+    #-----------------------
+    # Autos
+    #----------------------
+    with open(r'{}\Autos\{}-{}_autos.csv'.format(ruta,t_end,t_start), 'w',newline='') as file:
+        writer = csv.writer(file, quoting=csv.QUOTE_ALL, delimiter=',')
+        writer.writerows(autos)
+
 # -----------------------------
 
 # -----------------------------------------------------------------
@@ -210,6 +229,7 @@ def ArmarSchedule(key):
         simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period))
         agendados[-1].solve()
         simulaciones[-1].run()
+
     @task
     def ExecAsaQc():
         # Agenda
@@ -223,6 +243,7 @@ def ArmarSchedule(key):
         simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period))
         agendados[-1].solve()
         simulaciones[-1].run()
+
     @task
     def ExecUncontrolledCharging():
         # Agenda
@@ -230,6 +251,7 @@ def ArmarSchedule(key):
         # Simulacion
         simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period))
         simulaciones[-1].run()
+
     @task
     def ExecTotalEnergy():
         # Agenda
@@ -243,6 +265,7 @@ def ArmarSchedule(key):
         simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period))
         agendados[-1].solve()
         simulaciones[-1].run()
+
     @task
     def ExecUnbalMin1():
         # Esta funcion de utilidad que minimiza el desbalance
@@ -271,6 +294,58 @@ def ArmarSchedule(key):
         agendados[-1].solve()
         simulaciones[-1].run()
 
+    @task
+    def ExecRates():
+        # Agenda
+        agendados.append(
+            adacharge.AdaptiveChargingAlgorithmOffline(
+                [adacharge.ObjectiveComponent(only_rates)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        agendados[-1].register_events(events)
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period))
+        agendados[-1].solve()
+        simulaciones[-1].run()
+
+    @task
+    def ExecAsaQcOnline():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(asa_qc)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+
+
+    @task
+    def ExecRatesUnbalOnline():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+
+
+    @task
+    def ExecRatesOnline():
+        # Esta funcion maximiza la cantidad de energía que se brinda a los autos
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(only_rates)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+    # EJECUCION
     tasks['Exec' + key]()
 
 def corriente_trafo(sim):
@@ -339,7 +414,7 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     # La entrada tipo_grafico es para decidir si usar un subplot o un gráfico agrupado
 
     ## Variables generales del plot
-    guardar_graficas = False
+    guardar_graficas = True
     etiquetas = ["Ia","Ib","Ic"]
     locator = mdates.AutoDateLocator(maxticks=6)
     formatter = mdates.ConciseDateFormatter(locator)
@@ -451,7 +526,6 @@ def obtener_energia_simulada(sim,tipo='acumulada'):
         E_t = E_t.cumsum(axis=0)
     return E_t
 
-
 def plot_energias_xy(Energias,labels):
     ## Plotea el grafico de dispersion entre la energía deseada y la despachada
     f, ax = plt.subplots()
@@ -479,10 +553,11 @@ from acnportal import algorithms
 
 # -- Experiment Parameters ---------------------------------------------------------------------------------------------
 timezone = pytz.timezone("America/Los_Angeles")
-t_start = [2018,9,5]
-t_end = [2018,9,7]
+t_start = [2019,9,1]
+t_end = [2019,9,15]
 start = timezone.localize(datetime(t_start[0],t_start[1],t_start[2]))
-end = timezone.localize(datetime(t_end[0],t_end[1],t_end[2]))
+end = timezone.localize(datetime(
+    t_end[0],t_end[1],t_end[2]))
 period = 5  # minute
 voltage = 208  # volts
 default_battery_power = 32 * voltage / 1000  # kW
@@ -497,7 +572,8 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 # - AsaQc
 # - UnbalMin1
 
-metodos = ("AsaQc","RatesUnbal")
+#metodos = ("AsaQc","RatesUnbal","RatesUnbalOnline")
+metodos = ("AsaQc","Rates","RatesUnbal")
 agendados = []
 simulaciones = []
 energias_demandadas =[]
@@ -526,11 +602,14 @@ for i in range(0,len(metodos)):
 
 
 
-# -- Exportacion ----------------------------------------------------------------------------------------------------------
-if exportar:
-    for i in range(0,len(simulaciones)):
-        # Exportacion de la simulacion
-        ExportarSimulacion(simulaciones[i],metodos[i])
+# -- Exportacion y analisis ----------------------------------------------------------------------------------------------------------
+if exportar: ExportarSimulacion(simulaciones,metodos)
+
+# Analysis
+for i in range(0, len(simulaciones)):
+    # Exportacion de la simulacion
+    print(r'{}% de energía entregada con {}'.format(round(acnsim.proportion_of_energy_delivered(simulaciones[i])*100,1),metodos[i]))
+
 # Graficas
 graficar_simulaciones(simulaciones,'porFase')
 
