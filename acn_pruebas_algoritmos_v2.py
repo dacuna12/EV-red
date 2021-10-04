@@ -16,7 +16,7 @@ from adacharge import *
 import numpy
 import csv
 import pandas
-
+import time
 
 
 # All custom algorithms should inherit from the abstract class BaseAlgorithm. It is the responsibility of all derived
@@ -42,6 +42,7 @@ def asa_qc(rates, infrastructure, interface, **kwargs):
     return u_qc+10e-12*u_es
 
 def only_rates(rates, infrastructure, interface, **kwargs):
+    # Solo toma el rates
     return cp.sum(rates)
 
 def rates_unbal(rates, infrastructure, interface, **kwargs):
@@ -52,6 +53,80 @@ def rates_unbal(rates, infrastructure, interface, **kwargs):
     u_rates = cp.sum(rates)
     u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
     return u_rates+alpha_unbal*u_unbal
+
+def rates_unbal_50(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/50
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+def rates_unbal_80(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/80
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+def rates_unbal_150(rates, infrastructure, interface, **kwargs):
+    alpha_unbal = 1/150
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+
+def rates_unbal_200(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/200
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+
+def rates_unbal_400(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/400
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+
+def rates_unbal_600(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/600
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+
+def rates_unbal_800(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/800
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+
+def rates_unbal_1000(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/1000
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+
+def only_unbal(rates, infrastructure, interface, **kwargs):
+    # Solo toma el unbal
+    return rates_phase(rates,infrastructure, interface,**kwargs)
 
 def total_energy(rates, infrastructure, interface, **kwargs):
     return cp.sum(get_period_energy(rates, infrastructure, interface.period))
@@ -320,7 +395,6 @@ def ArmarSchedule(key):
         simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
         simulaciones[-1].run()
 
-
     @task
     def ExecRatesUnbalOnline():
         # Esta funcion de utilidad que minimiza el desbalance
@@ -332,7 +406,107 @@ def ArmarSchedule(key):
         # Simulacion
         simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
         simulaciones[-1].run()
+    # Unbal con distintos ponderadores de peso unbal #
+    @task
+    def ExecRatesUnbalOnlineAlpha50():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal_50)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+    @task
+    def ExecRatesUnbalOnlineAlpha80():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal_80)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
 
+    @task
+    def ExecRatesUnbalOnlineAlpha100():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+    @task
+    def ExecRatesUnbalOnlineAlpha150():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal_150)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+    @task
+    def ExecRatesUnbalOnlineAlpha200():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal_200)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+    @task
+    def ExecRatesUnbalOnlineAlpha400():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal_400)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+    @task
+    def ExecRatesUnbalOnlineAlpha600():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal_600)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+    @task
+    def ExecRatesUnbalOnlineAlpha800():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal_800)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
+    @task
+    def ExecRatesUnbalOnlineAlpha1000():
+        # Esta funcion de utilidad que minimiza el desbalance
+        agendados.append(
+            adacharge.AdaptiveSchedulingAlgorithm(
+                [adacharge.ObjectiveComponent(rates_unbal_1000)], solver=cp.MOSEK, enforce_energy_equality=False
+            )
+        )
+        # Simulacion
+        simulaciones.append(acnsim.Simulator(deepcopy(cn), agendados[-1], deepcopy(events), start, period=period, verbose=False))
+        simulaciones[-1].run()
 
     @task
     def ExecRatesOnline():
@@ -553,8 +727,8 @@ from acnportal import algorithms
 
 # -- Experiment Parameters ---------------------------------------------------------------------------------------------
 timezone = pytz.timezone("America/Los_Angeles")
-t_start = [2019,9,1]
-t_end = [2019,9,15]
+t_start = [2019,11,4]
+t_end = [2019,11,5]
 start = timezone.localize(datetime(t_start[0],t_start[1],t_start[2]))
 end = timezone.localize(datetime(
     t_end[0],t_end[1],t_end[2]))
@@ -573,7 +747,8 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 # - UnbalMin1
 
 #metodos = ("AsaQc","RatesUnbal","RatesUnbalOnline")
-metodos = ("AsaQc","Rates","RatesUnbal")
+metodos = ("AsaQcOnline","RatesUnbalOnlineAlpha50","RatesUnbalOnlineAlpha80","RatesUnbalOnlineAlpha100","RatesUnbalOnlineAlpha150")
+t_ejecucion = np.zeros((len(metodos),2))
 agendados = []
 simulaciones = []
 energias_demandadas =[]
@@ -592,8 +767,10 @@ autos = datos_ev(API_KEY, site, start, end, period)
 
 # Armados de schedules en funcion de los metodos
 for i in range(0,len(metodos)):
+    # Control de tiempos
+    t_ejecucion[i,0]=time.time()
     ArmarSchedule(metodos[i])
-
+    t_ejecucion[i,1]=time.time()
 # -- Analysis ----------------------------------------------------------------------------------------------------------
 # Se realizan graficas de las corrientes desbalanceadas y del indicador de desbalance
 # Las entradas son la lista de simulaciones realizadas y un str que refiere a como se graficas los resultados
@@ -608,7 +785,7 @@ if exportar: ExportarSimulacion(simulaciones,metodos)
 # Analysis
 for i in range(0, len(simulaciones)):
     # Exportacion de la simulacion
-    print(r'{}% de energía entregada con {}'.format(round(acnsim.proportion_of_energy_delivered(simulaciones[i])*100,1),metodos[i]))
+    print(r'{}% de energia entregada con {} - tiempo ejecucion {}s'.format(round(acnsim.proportion_of_energy_delivered(simulaciones[i])*100,1),metodos[i],round(t_ejecucion[i,1]-t_ejecucion[i,0],0)))
 
 # Graficas
 graficar_simulaciones(simulaciones,'porFase')
