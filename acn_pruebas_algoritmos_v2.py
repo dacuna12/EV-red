@@ -88,6 +88,15 @@ def rates_unbal_200(rates, infrastructure, interface, **kwargs):
     u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
     return u_rates+alpha_unbal*u_unbal
 
+def rates_unbal_300(rates, infrastructure, interface, **kwargs):
+    # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
+    alpha_unbal = 1/300
+    # Es un ponderadador de desbalance
+    #u_qc = adacharge.quick_charge(rates, infrastructure, interface, **kwargs)
+    u_rates = cp.sum(rates)
+    u_unbal = rates_phase(rates,infrastructure, interface,**kwargs)
+    return u_rates+alpha_unbal*u_unbal
+
 def rates_unbal_400(rates, infrastructure, interface, **kwargs):
     # Esta es la función que utilizan en el paper u=u_qc+10-12Ues
     alpha_unbal = 1/400
@@ -271,7 +280,12 @@ def ExportarSimulacion(simulaciones,metodos):
     # Energias
     #----------------------
     Resultados_E = energias_por_EV(simulaciones)
-    np.savetxt(r'{}\Energias\{}-{}_EnegiasEV.csv'.format(ruta,t_end,t_start),Resultados_E,delimiter=",")
+    # Lo hardcodeo
+    label_E = 'E_dem'
+    for i in range(0,len(metodos)):
+        label_E = label_E +","+metodos[i]
+
+    np.savetxt(r'{}\Energias\{}-{}_EnegiasEV.csv'.format(ruta,t_end,t_start),Resultados_E,delimiter=",",header=label_E,fmt="%i", comments='')
 
     #-----------------------
     # Autos
@@ -662,11 +676,15 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     E_dem = 0
     for i in range(0,len(autos)):
         E_dem = E_dem + autos[i][-1]
+    E_dem_x_hora = E_autos_por_paso(autos)
     # Ploteos de energia en el mismo subplot
     fig_E, axs_E = plt.subplots()
     for i_sim in range(0, len(simulaciones)):
         Energia = obtener_energia_simulada(simulaciones[i_sim])
         axs_E.plot(t, Energia, label=metodos[i_sim])
+    # Energia acumulada
+    axs_E.plot(t, E_dem_x_hora[:, 1], color='r', linestyle='--', label='E_dem_EVs')
+
     # Se ajustan los ejes x de las graficas
     axs_E.set_ylabel("Energia acumulada (kWh)")
     for label in axs_E.get_xticklabels():
@@ -674,7 +692,6 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     axs_E.xaxis.set_major_locator(locator)
     axs_E.xaxis.set_major_formatter(formatter)
     # Agrego el grid y las etiquetas
-    plt.axhline(y=E_dem, color='r',linestyle='--',label='E_dem_EVs')
     plt.grid(True)
     plt.legend()
     fig_E.suptitle('Energía acumulada', fontsize=14)
@@ -699,6 +716,24 @@ def obtener_energia_simulada(sim,tipo='acumulada'):
     else:
         E_t = E_t.cumsum(axis=0)
     return E_t
+
+def E_autos_por_paso(lista_autos):
+    # Este procedimiento procesa la lista de autos y arma un vector con los tiempos de cada simulacion
+
+    # Llevo los datos a un numpy_array
+    E_autos = np.zeros((len(lista_autos), 3))
+    for i in range(0, len(lista_autos)):
+        E_autos[i, 0] = lista_autos[i][2]
+        E_autos[i, 1] = lista_autos[i][3]
+        E_autos[i, 2] = lista_autos[i][4]
+    # Creo el numpy ordenado de la corrida
+    t_fin = np.amax(E_autos[:, 1]).astype(np.int64)+1
+    E_x_hora = np.zeros((t_fin, 2))
+    E_x_hora[:, 0] = np.arange(t_fin).astype(np.int64)
+    # Itero en las horas y voy sumando todas las energias que son en esa hora
+    for t in range(0, E_x_hora.shape[0]):
+        E_x_hora[t, 1] = np.sum(np.where(E_autos[:, 0] < t, E_autos[:, 2], 0))
+    return E_x_hora
 
 def plot_energias_xy(Energias,labels):
     ## Plotea el grafico de dispersion entre la energía deseada y la despachada
@@ -747,7 +782,8 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 # - UnbalMin1
 
 #metodos = ("AsaQc","RatesUnbal","RatesUnbalOnline")
-metodos = ("AsaQcOnline","RatesUnbalOnlineAlpha50","RatesUnbalOnlineAlpha80","RatesUnbalOnlineAlpha100","RatesUnbalOnlineAlpha150")
+#metodos = ("AsaQcOnline","RatesUnbalOnlineAlpha200")
+metodos = ("AsaQcOnline","RatesUnbalOnlineAlpha600")
 t_ejecucion = np.zeros((len(metodos),2))
 agendados = []
 simulaciones = []
