@@ -270,11 +270,16 @@ def ExportarSimulacion(simulaciones,metodos):
         df = pandas.DataFrame(I.transpose())
         df.set_axis(('TR_A','TR_B','TR_C'), axis='columns', inplace='True')
         df.to_excel(r'{}\Corrientes\{}-{}_Isim_{}.xlsx'.format(ruta,t_end,t_start,metodos[i_sim]))
-        # Desbalance
-        Unbal = desbalance_trafo(simulaciones[i_sim])
+        # Desbalance (g.T M g)
+        Unbal = desbalance_trafo(simulaciones[i_sim],"componentes_inversa")
         df = pandas.DataFrame(Unbal.transpose())
         #df.set_axis('NEMA', axis=0, inplace='True')
-        df.to_excel(r'{}\Corrientes\{}-{}_Unbalsim_{}.xlsx'.format(ruta,t_end,t_start,metodos[i_sim]))
+        df.to_excel(r'{}\Corrientes\{}-{}_Unbalsim_gTMG{}.xlsx'.format(ruta,t_end,t_start,metodos[i_sim]))
+        # Desbalance (NEMA)
+        Unbal = desbalance_trafo(simulaciones[i_sim],"NEMA")
+        df = pandas.DataFrame(Unbal.transpose())
+        #df.set_axis('NEMA', axis=0, inplace='True')
+        df.to_excel(r'{}\Corrientes\{}-{}_Unbalsim_NEMA{}.xlsx'.format(ruta,t_end,t_start,metodos[i_sim]))
 
     #----------------------
     # Energias
@@ -285,8 +290,15 @@ def ExportarSimulacion(simulaciones,metodos):
     for i in range(0,len(metodos)):
         label_E = label_E +","+metodos[i]
 
-    np.savetxt(r'{}\Energias\{}-{}_EnegiasEV.csv'.format(ruta,t_end,t_start),Resultados_E,delimiter=",",header=label_E,fmt="%i", comments='')
-
+    np.savetxt(r'{}\Energias\{}-{}_EnegiasEV_demVSentregada.csv'.format(ruta,t_end,t_start),Resultados_E,delimiter=",",header=label_E,fmt="%i", comments='')
+    # Perfil energetico
+    label_E = 't,E_dem'
+    E_tot = E_autos_por_paso(autos) # Demanda de los autos
+    # Acumulo los valores en un numpyarray con E tot e inicializo con los datos iniciales
+    for i_sim in range(0, len(simulaciones)):
+        E_tot= np.concatenate((E_tot,np.expand_dims(obtener_energia_simulada(simulaciones[i_sim]).to_numpy(),axis=1)),axis=1)
+        label_E = label_E +","+metodos[i]
+    np.savetxt(r'{}\Energias\{}-{}_EnegiasEV_perfil.csv'.format(ruta,t_end,t_start),Resultados_E,delimiter=",",header=label_E,fmt="%i", comments='')
     #-----------------------
     # Autos
     #----------------------
@@ -551,7 +563,7 @@ def corriente_trafo(sim):
     currents.transpose()
     return currents
 
-def desbalance_trafo(sim):
+def desbalance_trafo(sim,unbal_type):
     """ Funcion que calcula el desbalance en bornes del transformador
 
     Args:
@@ -562,7 +574,7 @@ def desbalance_trafo(sim):
     """
     # Variables locales de llamada
     phase_ids = ("Primary A","Primary B", "Primary C")
-    return acnsim.current_unbalance(sim,unbalance_type="componentes_inversa",phase_ids=phase_ids)
+    return acnsim.current_unbalance(sim,unbalance_type=unbal_type,phase_ids=phase_ids)
 
 def energias_por_EV(simulaciones):
     # Obtengo las matrices con las energias - Son PANDAS que tienen en Energias_sim[i_ener].axes[1][i] el cargador
@@ -606,6 +618,8 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     etiquetas = ["Ia","Ib","Ic"]
     locator = mdates.AutoDateLocator(maxticks=6)
     formatter = mdates.ConciseDateFormatter(locator)
+    label_paper = ['AsaQC', 'RatesUnbal']
+    use_label_paper = True
 
     ## Creo la grafica en funcion del tipo de grafico
     if tipo_grafico == 'unico':
@@ -645,19 +659,24 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
         plt.legend()
 
     # Titulo general
-    fig_I.suptitle('Corriente en secundario del TR', fontsize=14)
+    # fig_I.suptitle('Corriente en secundario del TR', fontsize=14)
     if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_I-TR.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
 
     # -------------------------------------------------------------------------------
     # Desbalance del trafo - En este caso pongo all en el mismo grafico
     # -------------------------------------------------------------------------------
+
+    # Indicador g.T M g
     fig_unbal, axs_unbal = plt.subplots()
     for i_sim in range(0, len(simulaciones)):
-        unbal = desbalance_trafo(simulaciones[i_sim])
-        axs_unbal.plot(t, unbal, label=metodos[i_sim])
+        unbal = desbalance_trafo(simulaciones[i_sim],"componentes_inversa")
+        if use_label_paper:
+            axs_unbal.plot(t, unbal, label=label_paper[i_sim])
+        else:
+            axs_unbal.plot(t, unbal, label=metodos[i_sim])
 
     # Se ajustan los ejes x de las graficas
-    axs_unbal.set_ylabel("Indicador gT*M*g")
+    axs_unbal.set_ylabel("Unbal (gT*M*g)")
     for label in axs_unbal.get_xticklabels():
         label.set_rotation(40)
     axs_unbal.xaxis.set_major_locator(locator)
@@ -665,28 +684,49 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     # Agrego el grid y las etiquetas
     plt.grid(True)
     plt.legend()
-    fig_unbal.suptitle('Indicador de desbalance', fontsize=14)
+    #fig_unbal.suptitle('Indicador de desbalance', fontsize=14)
     if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_Unbal.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
 
+    # Indicador NEMA
+    fig_unbal, axs_unbal = plt.subplots()
+    for i_sim in range(0, len(simulaciones)):
+        unbal = desbalance_trafo(simulaciones[i_sim],"NEMA")*100
+        if use_label_paper:
+            axs_unbal.plot(t, unbal, label=label_paper[i_sim])
+        else:
+            axs_unbal.plot(t, unbal, label=metodos[i_sim])
+
+    # Se ajustan los ejes x de las graficas
+    axs_unbal.set_ylabel("Nema (%)")
+    for label in axs_unbal.get_xticklabels():
+        label.set_rotation(40)
+    axs_unbal.xaxis.set_major_locator(locator)
+    axs_unbal.xaxis.set_major_formatter(formatter)
+    # Agrego el grid y las etiquetas
+    plt.grid(True)
+    plt.legend()
+    #fig_unbal.suptitle('Indicador de desbalance', fontsize=14)
+    if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_Unbal.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
     # -------------------------------------------------------------------------------
     # Energia total
     # -------------------------------------------------------------------------------
 
     # Energía total solicitda por los autos
-    E_dem = 0
-    for i in range(0,len(autos)):
-        E_dem = E_dem + autos[i][-1]
     E_dem_x_hora = E_autos_por_paso(autos)
     # Ploteos de energia en el mismo subplot
     fig_E, axs_E = plt.subplots()
     for i_sim in range(0, len(simulaciones)):
+
         Energia = obtener_energia_simulada(simulaciones[i_sim])
-        axs_E.plot(t, Energia, label=metodos[i_sim])
+        if use_label_paper:
+            axs_E.plot(t, Energia, label=label_paper[i_sim])
+        else:
+            axs_E.plot(t, Energia, label=metodos[i_sim])
     # Energia acumulada
-    axs_E.plot(t, E_dem_x_hora[:, 1], color='r', linestyle='--', label='E_dem_EVs')
+    axs_E.plot(t, E_dem_x_hora[:, 1], color='r', linestyle='--', label='Energy requested')
 
     # Se ajustan los ejes x de las graficas
-    axs_E.set_ylabel("Energia acumulada (kWh)")
+    axs_E.set_ylabel("Energy (kWh)")
     for label in axs_E.get_xticklabels():
         label.set_rotation(40)
     axs_E.xaxis.set_major_locator(locator)
@@ -694,7 +734,7 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     # Agrego el grid y las etiquetas
     plt.grid(True)
     plt.legend()
-    fig_E.suptitle('Energía acumulada', fontsize=14)
+    #fig_E.suptitle('Energía acumulada', fontsize=14)
     if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_Energia.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
 
     # -------------------------------------------------------------------------------
@@ -703,7 +743,10 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
 
     # Se obtiene la matriz de energias y se hace el ploteo
     Resultados_E = energias_por_EV(simulaciones)
-    plot_energias_xy(Resultados_E,metodos)
+    if use_label_paper:
+        plot_energias_xy(Resultados_E,label_paper)
+    else:
+        plot_energias_xy(Resultados_E, metodos)
 
     # Se muestran todas las graficas
     plt.show()
@@ -738,15 +781,15 @@ def E_autos_por_paso(lista_autos):
 def plot_energias_xy(Energias,labels):
     ## Plotea el grafico de dispersion entre la energía deseada y la despachada
     f, ax = plt.subplots()
-    f.suptitle('Energia demandada y despachada por vehículo')
+    #f.suptitle('Energia demandada y despachada por vehículo')
     # Ploteo de la energia
     for j in range(1,Energias.shape[1]):
         ax.scatter(Energias[:,0], Energias[:,j],marker='o', alpha=0.5,label=labels[j-1])
     # Ploteo la linea diagonal
     ax.plot([0, np.amax(Energias[:,0],axis=0)], [0, np.amax(Energias[:,0],axis=0)], ls="--", c=".3")
     # Ajustes cosmeticos
-    ax.set_xlabel("Energia demandanda (kWh)")
-    ax.set_ylabel("Energia despachada (kWh)")
+    ax.set_xlabel("Energy requested (kWh)")
+    ax.set_ylabel("Energy delivered (kWh)")
     plt.grid(True)
     plt.legend()
 
@@ -784,6 +827,8 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 #metodos = ("AsaQc","RatesUnbal","RatesUnbalOnline")
 #metodos = ("AsaQcOnline","RatesUnbalOnlineAlpha200")
 metodos = ("AsaQcOnline","RatesUnbalOnlineAlpha600")
+
+#metodos = ("AsaQc","RatesUnbal")
 t_ejecucion = np.zeros((len(metodos),2))
 agendados = []
 simulaciones = []
