@@ -17,7 +17,8 @@ import numpy
 import csv
 import pandas
 import time
-
+import matplotlib.pyplot as plt
+plt.rcParams['axes.grid'] = True
 
 # All custom algorithms should inherit from the abstract class BaseAlgorithm. It is the responsibility of all derived
 # classes to implement the schedule method. This method takes as an input a list of EVs which are currently connected
@@ -563,6 +564,18 @@ def corriente_trafo(sim):
     currents.transpose()
     return currents
 
+def corriente_trafo_prom(sim):
+    """ Funcion que calcula la corriente promedio de las fases
+
+    Args:
+        sim (Simulator): simulacion
+
+    Returns:
+        Un np.array con cada timestamp en una columna y cada una de las fases de la corriente
+    """
+    currents = corriente_trafo(sim)
+    return np.sum(currents, axis=0) / 3
+
 def desbalance_trafo(sim,unbal_type):
     """ Funcion que calcula el desbalance en bornes del transformador
 
@@ -573,7 +586,7 @@ def desbalance_trafo(sim,unbal_type):
         Un np.array con los timestamp y el desbalance
     """
     # Variables locales de llamada
-    phase_ids = ("Primary A","Primary B", "Primary C")
+    phase_ids = ("Secondary A","Secondary B", "Secondary C")
     return acnsim.current_unbalance(sim,unbalance_type=unbal_type,phase_ids=phase_ids)
 
 def energias_por_EV(simulaciones):
@@ -618,7 +631,7 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     etiquetas = ["Ia","Ib","Ic"]
     locator = mdates.AutoDateLocator(maxticks=6)
     formatter = mdates.ConciseDateFormatter(locator)
-    label_paper = ['AsaQC', 'RatesUnbal']
+    label_paper = ['AsaQC','Rates', 'RatesBal']
     use_label_paper = True
 
     ## Creo la grafica en funcion del tipo de grafico
@@ -639,14 +652,17 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
         if tipo_grafico == 'unico':
             for I_arr, etiqueta in zip(I, etiquetas):
                 axsI.plot(t, I_arr, label=etiqueta)
-            axsI.set_title(metodos[i_sim])
+            if use_label_paper: axsI.set_title(label_paper[i_sim])
+            else: axsI.set_title(metodos[i_sim])
+
             # Grilla y referencias
             #plt.grid(True)
             #plt.legend()
         elif tipo_grafico=='porFase':
             for I_arr, etiqueta in zip(I,etiquetas):
                 axsI[i_sim].plot(t,I_arr, label=etiqueta)
-            axsI[i_sim].set_title(metodos[i_sim])
+            if use_label_paper: axsI[i_sim].set_title(label_paper[i_sim])
+            else: axsI[i_sim].set_title(metodos[i_sim])
             # Grilla y referencias
 
     # Se ajustan los ejes de las graficas
@@ -688,25 +704,43 @@ def graficar_simulaciones(simulaciones,tipo_grafico):
     if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_Unbal.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
 
     # Indicador NEMA
-    fig_unbal, axs_unbal = plt.subplots()
+    # Se pone en el superior el indicador y en el inferior la corriente promedio
+    colores = ['tab:blue','tab:orange','tab:green']
+    fig_unbal, axs_unbal = plt.subplots(2, 1,sharex=True)
     for i_sim in range(0, len(simulaciones)):
-        unbal = desbalance_trafo(simulaciones[i_sim],"NEMA")*100
+        # Calculo las variables para la simulacion
+        unbal = desbalance_trafo(simulaciones[i_sim],"NEMA_MG1")*100
+        I_prom = corriente_trafo_prom(simulaciones[i_sim])
         if use_label_paper:
-            axs_unbal.plot(t, unbal, label=label_paper[i_sim])
+            axs_unbal[0].plot(t, unbal, label=label_paper[i_sim],color=colores[i_sim])
+            axs_unbal[1].plot(t, I_prom, label=label_paper[i_sim], color=colores[i_sim])
+            #axs_unbal[2].plot(t, I_prom, label=label_paper[i_sim], color=colores[i_sim])
         else:
-            axs_unbal.plot(t, unbal, label=metodos[i_sim])
+            axs_unbal[0].plot(t, unbal, label=metodos[i_sim],color=colores[i_sim])
+            axs_unbal[1].plot(t, I_prom, label=metodos[i_sim], color=colores[i_sim])
 
+        # Agrego la corriente promedio en el eje secundario #
+
+        # axs_Iprom = axs_unbal.twinx()
+        # axs_Iprom.plot(t, I_prom,linewidth=1,linestyle='dashed',color=colores[i_sim])
+        # axs_Iprom.set_yticks(np.linspace(axs_Iprom.get_yticks()[0], axs_Iprom.get_yticks()[-1], len(axs_unbal.get_yticks())))
     # Se ajustan los ejes x de las graficas
-    axs_unbal.set_ylabel("Nema (%)")
-    for label in axs_unbal.get_xticklabels():
-        label.set_rotation(40)
-    axs_unbal.xaxis.set_major_locator(locator)
-    axs_unbal.xaxis.set_major_formatter(formatter)
+    axs_unbal[0].set_ylabel("Nema (%)")
+    # axs_unbal[0].set_ylim(0, 100) # Fuerzo a que el eje de la y vaya hasta 100
+    axs_unbal[1].set_ylabel("I average (A)")
+    # axs_unbal[1].set_ylim(0, 300)  # Fuerzo a que el eje de la y vaya hasta 100
+
+    for i in range(0,1):
+        for label in axs_unbal[i].get_xticklabels():
+            label.set_rotation(40)
+        axs_unbal[i].xaxis.set_major_locator(locator)
+        axs_unbal[i].xaxis.set_major_formatter(formatter)
     # Agrego el grid y las etiquetas
+    #fig_unbal.tight_layout()
     plt.grid(True)
     plt.legend()
     #fig_unbal.suptitle('Indicador de desbalance', fontsize=14)
-    if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_Unbal.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
+    if guardar_graficas: plt.savefig(r'{}\Graficas\{}-{}_UnbalNEMA.png'.format(ruta, t_end, t_start), dpi=300, bbox_inches='tight')
     # -------------------------------------------------------------------------------
     # Energia total
     # -------------------------------------------------------------------------------
@@ -805,8 +839,8 @@ from acnportal import algorithms
 
 # -- Experiment Parameters ---------------------------------------------------------------------------------------------
 timezone = pytz.timezone("America/Los_Angeles")
-t_start = [2019,11,4]
-t_end = [2019,11,5]
+t_start = [2019,2,1]
+t_end = [2019,2,2]
 start = timezone.localize(datetime(t_start[0],t_start[1],t_start[2]))
 end = timezone.localize(datetime(
     t_end[0],t_end[1],t_end[2]))
@@ -826,7 +860,7 @@ ruta = 'C:/Users/Diego/Documents/Proyecto FSE/Exportacion'
 
 #metodos = ("AsaQc","RatesUnbal","RatesUnbalOnline")
 #metodos = ("AsaQcOnline","RatesUnbalOnlineAlpha200")
-metodos = ("AsaQcOnline","RatesUnbalOnlineAlpha600")
+metodos = ("AsaQcOnline","RatesOnline","RatesUnbalOnlineAlpha600")
 
 #metodos = ("AsaQc","RatesUnbal")
 t_ejecucion = np.zeros((len(metodos),2))
